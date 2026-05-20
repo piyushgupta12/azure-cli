@@ -477,12 +477,12 @@ class PacketCaptureCreate(_PacketCaptureCreate):
         args_schema.include = AAZListArg(
             options=["--include"],
             arg_group="Scope",
-            help="Space-separated list of VMSS instances to include in packet capture like 0 1 2.",
+            help="Space-separated list of VMSS instance IDs to include in packet capture (e.g., 0 1 2).",
         )
         args_schema.exclude = AAZListArg(
             options=["--exclude"],
             arg_group="Scope",
-            help="Space-separated list of VMSS instances to exclude in packet capture.",
+            help="Space-separated list of VMSS instance IDs to exclude from packet capture (e.g., 0 1 2).",
         )
         args_schema.storage_account = AAZResourceIdArg(
             options=["--storage-account"],
