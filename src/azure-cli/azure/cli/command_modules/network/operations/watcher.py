@@ -28,9 +28,9 @@ from ..aaz.latest.network.watcher.flow_log import Create as _NwFlowLogCreate, Up
     List as _NwFlowLogList, Delete as _NwFlowLogDelete
 from ..aaz.latest.network.watcher.troubleshooting import Start as _NwTroubleshootingStart, \
     Show as _NwTroubleshootingShow
-from ..aaz.latest.network.watcher.packet_capture import Create as _PacketCaptureCreate
-from ..aaz.latest.network.watcher.packet_capture import Delete as _PacketCaptureDelete, List as _PacketCaptureList, \
-    Show as _PacketCaptureShow, ShowStatus as _PacketCaptureShowStatus, Stop as _PacketCaptureStop
+from ..aaz.latest.network.network_watcher.packet_capture import Create as _PacketCaptureCreate
+from ..aaz.latest.network.network_watcher.packet_capture import Delete as _PacketCaptureDelete, List as _PacketCaptureList, \
+    Show as _PacketCaptureShow, QueryStatu as _PacketCaptureShowStatus, Stop as _PacketCaptureStop
 
 from ..aaz.latest.network.watcher.connection_monitor import Create as _WatcherConnectionMonitorCreate
 from ..aaz.latest.network.watcher.connection_monitor import Start as _WatcherConnectionMonitorStart
@@ -71,7 +71,7 @@ def get_network_watcher_from_location(cmd, watcher_name="watcher_name", rg_name=
     setattr(args, watcher_name, id_parts["name"])
 
 
-def get_network_watcher_from_vm(cmd):
+def get_network_watcher_from_vm(cmd, watcher_name="watcher_name", rg_name="watcher_rg"):
     from ...vm.operations.vm import VMShow
     args = cmd.ctx.args
     vm_name = parse_resource_id(args.vm.to_serialized_data())["name"]
@@ -80,17 +80,17 @@ def get_network_watcher_from_vm(cmd):
         'vm_name': vm_name
     })
     args.location = vm.get('location')
-    get_network_watcher_from_location(cmd)
+    get_network_watcher_from_location(cmd, watcher_name=watcher_name, rg_name=rg_name)
 
 
-def get_network_watcher_from_resource(cmd):
+def get_network_watcher_from_resource(cmd, watcher_name="watcher_name", rg_name="watcher_rg"):
     args = cmd.ctx.args
     resource = get_arm_resource_by_id(cmd.cli_ctx, args.resource.to_serialized_data())
     args.location = resource.location
-    get_network_watcher_from_location(cmd)
+    get_network_watcher_from_location(cmd, watcher_name=watcher_name, rg_name=rg_name)
 
 
-def get_network_watcher_from_vmss(cmd):
+def get_network_watcher_from_vmss(cmd, watcher_name="watcher_name", rg_name="watcher_rg"):
     from ...vm.operations.vmss import VMSSShow
     args = cmd.ctx.args
     vmss_name = parse_resource_id(args.target.to_serialized_data())["name"]
@@ -99,7 +99,7 @@ def get_network_watcher_from_vmss(cmd):
         'vm_scale_set_name': vmss_name
     })
     args.location = vmss.get('location')
-    get_network_watcher_from_location(cmd)
+    get_network_watcher_from_location(cmd, watcher_name=watcher_name, rg_name=rg_name)
 
 
 class TestIPFlow(_TestIPFlow):
@@ -450,43 +450,147 @@ class PacketCaptureCreate(_PacketCaptureCreate):
                          "/virtualMachines/{}",
             ),
         )
+        args_schema.capture_size = AAZIntArg(
+            options=["--capture-size"],
+            help="Number of bytes captured per packet. Excess bytes are truncated.",
+            fmt=AAZIntArgFormat(
+                maximum=4294967295,
+                minimum=0,
+            ),
+        )
+        args_schema.capture_limit = AAZIntArg(
+            options=["--capture-limit"],
+            help="Maximum size in bytes of the capture output.",
+            fmt=AAZIntArgFormat(
+                maximum=4294967295,
+                minimum=0,
+            ),
+        )
+        args_schema.time_limit = AAZIntArg(
+            options=["--time-limit"],
+            help="Maximum duration of the capture session in seconds.",
+            fmt=AAZIntArgFormat(
+                maximum=18000,
+                minimum=0,
+            ),
+        )
+        args_schema.include = AAZListArg(
+            options=["--include"],
+            arg_group="Scope",
+            help="Space-separated list of VMSS instances to include in packet capture like 0 1 2.",
+        )
+        args_schema.exclude = AAZListArg(
+            options=["--exclude"],
+            arg_group="Scope",
+            help="Space-separated list of VMSS instances to exclude in packet capture.",
+        )
+        args_schema.storage_account = AAZResourceIdArg(
+            options=["--storage-account"],
+            arg_group="Storage",
+            help="Name or ID of a storage account to save the packet capture to.",
+            fmt=AAZResourceIdArgFormat(
+                template="/subscriptions/{subscription}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage"
+                         "/storageAccounts/{}",
+            ),
+        )
+        args_schema.storage_path = AAZStrArg(
+            options=["--storage-path"],
+            arg_group="Storage",
+            help="Fully qualified URI of an existing storage container in which to store the capture file.",
+        )
+        args_schema.file_path = AAZStrArg(
+            options=["--file-path"],
+            arg_group="Storage",
+            help="Local path on the targeted VM at which to save the packet capture.",
+        )
+        args_schema.local_path = AAZStrArg(
+            options=["--local-path"],
+            arg_group="Storage",
+            help="Local path for continuous packet capture output on the targeted VM.",
+        )
+        args_schema.include.Element = AAZStrArg()
+        args_schema.exclude.Element = AAZStrArg()
         args_schema.target._fmt = AAZResourceIdArgFormat(
             template="/subscriptions/{subscription}/resourceGroups/{resource_group_name}/providers/Microsoft.Compute"
                      "/virtualMachineScaleSets/{}",
         )
-        args_schema.storage_account._fmt = AAZResourceIdArgFormat(
-            template="/subscriptions/{subscription}/resourceGroups/{resource_group_name}/providers/Microsoft.Storage"
-                     "/storageAccounts/{}",
-        )
+        args_schema.target_type._default = "AzureVM"
         args_schema.target._required = False
-        args_schema.watcher_rg._required = False
-        args_schema.watcher_rg._registered = False
-        args_schema.watcher_name._required = False
-        args_schema.watcher_name._registered = False
+        args_schema.resource_group._required = False
+        args_schema.resource_group._registered = False
+        args_schema.network_watcher_name._required = False
+        args_schema.network_watcher_name._registered = False
+        args_schema.storage_location._required = False
         return args_schema
 
     def pre_operations(self):
         args = self.ctx.args
+        if has_value(args.capture_size):
+            args.bytes_to_capture_per_packet = args.capture_size
+        if has_value(args.capture_limit):
+            args.total_bytes_per_session = args.capture_limit
+        if has_value(args.time_limit):
+            args.time_limit_in_seconds = args.time_limit
+
         if has_value(args.target_type) and args.target_type.to_serialized_data().lower() == "azurevmss":
-            get_network_watcher_from_vmss(self)
+            if not has_value(args.target) and has_value(args.vm):
+                args.target = args.vm
+            if not has_value(args.target):
+                raise RequiredArgumentMissingError("usage error: --target is required when --target-type is AzureVMSS")
+            get_network_watcher_from_vmss(
+                self,
+                watcher_name="network_watcher_name",
+                rg_name="resource_group"
+            )
         else:
-            # set the appropriate fields if target is vm
-            get_network_watcher_from_vm(self)
-            args.target = args.vm
-            args.include, args.exclude = None, None
+            if not has_value(args.target):
+                args.target = args.vm
+            if not has_value(args.target):
+                raise RequiredArgumentMissingError("usage error: --vm is required when --target-type is AzureVM")
+            args.vm = args.target
+            get_network_watcher_from_vm(
+                self,
+                watcher_name="network_watcher_name",
+                rg_name="resource_group"
+            )
+            args.scope = None
 
-        storage_usage = ValidationError("usage error: --storage-account NAME_OR_ID [--storage-path PATH] [--file-path PATH] | --file-path PATH")
-        if not has_value(args.storage_account) and (has_value(args.storage_path) or not has_value(args.file_path)):
-            raise storage_usage
+        scope = {}
+        if has_value(args.scope):
+            scope = args.scope.to_serialized_data()
+        if has_value(args.include):
+            scope["include"] = args.include.to_serialized_data()
+        if has_value(args.exclude):
+            scope["exclude"] = args.exclude.to_serialized_data()
+        if scope:
+            args.scope = scope
 
+        storage_location = {}
+        if has_value(args.storage_location):
+            storage_location = args.storage_location.to_serialized_data()
+        if has_value(args.storage_account):
+            storage_location["storageId"] = args.storage_account.to_serialized_data()
+        if has_value(args.storage_path):
+            storage_location["storagePath"] = args.storage_path.to_serialized_data()
         if has_value(args.file_path):
             path = args.file_path.to_serialized_data()
             if not path.endswith(".cap"):
                 raise ValidationError("usage error: --file-path PATH must end with the '*.cap' extension")
-
             if not path.startswith("/"):
                 path = path.replace("/", "\\")
-            args.file_path = path
+            storage_location["filePath"] = path
+        if has_value(args.local_path):
+            path = args.local_path.to_serialized_data()
+            if not path.endswith(".cap"):
+                raise ValidationError("usage error: --local-path PATH must end with the '*.cap' extension")
+            if not path.startswith("/"):
+                path = path.replace("/", "\\")
+            storage_location["localPath"] = path
+        if not any(storage_location.get(k) for k in ["storageId", "storagePath", "filePath", "localPath"]):
+            raise ValidationError(
+                "usage error: --storage-account NAME_OR_ID [--storage-path PATH] [--file-path PATH] | --file-path PATH | --local-path PATH"
+            )
+        args.storage_location = storage_location
 
 
 class PacketCaptureDelete(_PacketCaptureDelete):
@@ -496,14 +600,14 @@ class PacketCaptureDelete(_PacketCaptureDelete):
         args_schema.location = AAZResourceLocationArg(
             required=True,
         )
-        args_schema.watcher_rg._required = False
-        args_schema.watcher_rg._registered = False
-        args_schema.watcher_name._required = False
-        args_schema.watcher_name._registered = False
+        args_schema.resource_group._required = False
+        args_schema.resource_group._registered = False
+        args_schema.network_watcher_name._required = False
+        args_schema.network_watcher_name._registered = False
         return args_schema
 
     def pre_operations(self):
-        get_network_watcher_from_location(self)
+        get_network_watcher_from_location(self, watcher_name="network_watcher_name", rg_name="resource_group")
 
 
 class PacketCaptureList(_PacketCaptureList):
@@ -513,14 +617,14 @@ class PacketCaptureList(_PacketCaptureList):
         args_schema.location = AAZResourceLocationArg(
             required=True,
         )
-        args_schema.watcher_rg._required = False
-        args_schema.watcher_rg._registered = False
-        args_schema.watcher_name._required = False
-        args_schema.watcher_name._registered = False
+        args_schema.resource_group._required = False
+        args_schema.resource_group._registered = False
+        args_schema.network_watcher_name._required = False
+        args_schema.network_watcher_name._registered = False
         return args_schema
 
     def pre_operations(self):
-        get_network_watcher_from_location(self)
+        get_network_watcher_from_location(self, watcher_name="network_watcher_name", rg_name="resource_group")
 
 
 class PacketCaptureShow(_PacketCaptureShow):
@@ -530,14 +634,14 @@ class PacketCaptureShow(_PacketCaptureShow):
         args_schema.location = AAZResourceLocationArg(
             required=True,
         )
-        args_schema.watcher_rg._required = False
-        args_schema.watcher_rg._registered = False
-        args_schema.watcher_name._required = False
-        args_schema.watcher_name._registered = False
+        args_schema.resource_group._required = False
+        args_schema.resource_group._registered = False
+        args_schema.network_watcher_name._required = False
+        args_schema.network_watcher_name._registered = False
         return args_schema
 
     def pre_operations(self):
-        get_network_watcher_from_location(self)
+        get_network_watcher_from_location(self, watcher_name="network_watcher_name", rg_name="resource_group")
 
 
 class PacketCaptureShowStatus(_PacketCaptureShowStatus):
@@ -547,14 +651,20 @@ class PacketCaptureShowStatus(_PacketCaptureShowStatus):
         args_schema.location = AAZResourceLocationArg(
             required=True,
         )
-        args_schema.watcher_rg._required = False
-        args_schema.watcher_rg._registered = False
-        args_schema.watcher_name._required = False
-        args_schema.watcher_name._registered = False
+        args_schema.name = AAZStrArg(
+            options=["-n", "--name"],
+            help="Name of the packet capture session.",
+        )
+        args_schema.resource_group._required = False
+        args_schema.resource_group._registered = False
+        args_schema.network_watcher_name._required = False
+        args_schema.network_watcher_name._registered = False
         return args_schema
 
     def pre_operations(self):
-        get_network_watcher_from_location(self)
+        if has_value(self.ctx.args.name):
+            self.ctx.args.packet_capture_name = self.ctx.args.name
+        get_network_watcher_from_location(self, watcher_name="network_watcher_name", rg_name="resource_group")
 
 
 class PacketCaptureStop(_PacketCaptureStop):
@@ -564,14 +674,20 @@ class PacketCaptureStop(_PacketCaptureStop):
         args_schema.location = AAZResourceLocationArg(
             required=True,
         )
-        args_schema.watcher_rg._required = False
-        args_schema.watcher_rg._registered = False
-        args_schema.watcher_name._required = False
-        args_schema.watcher_name._registered = False
+        args_schema.name = AAZStrArg(
+            options=["-n", "--name"],
+            help="Name of the packet capture session.",
+        )
+        args_schema.resource_group._required = False
+        args_schema.resource_group._registered = False
+        args_schema.network_watcher_name._required = False
+        args_schema.network_watcher_name._registered = False
         return args_schema
 
     def pre_operations(self):
-        get_network_watcher_from_location(self)
+        if has_value(self.ctx.args.name):
+            self.ctx.args.packet_capture_name = self.ctx.args.name
+        get_network_watcher_from_location(self, watcher_name="network_watcher_name", rg_name="resource_group")
 
 
 def process_nw_cm_v2_create_namespace(cmd):
